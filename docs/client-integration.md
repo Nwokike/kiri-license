@@ -117,6 +117,18 @@ The app verifies:
 - `status` is `active` or `grace`;
 - `exp`, when present, has not passed.
 
+### Exact signature encoding
+
+The token format is not a JWT library format. It is a compact Kiri-specific token:
+
+- The signature segment is the WebCrypto **raw `r || s` value**, 64 bytes for P-256—not a DER-encoded ECDSA signature.
+- The signed message is the **base64url payload segment as UTF-8 bytes**, not the decoded JSON bytes.
+- The public key is a base64url-encoded **SubjectPublicKeyInfo (SPKI) DER** blob for P-256.
+
+A Python verifier using `cryptography` must split the raw signature into `r` and `s`, convert it with `encode_dss_signature(r, s)`, and verify that DER signature against the base64url payload bytes. The public key is loaded with `serialization.load_der_public_key`.
+
+Do not verify the decoded JSON directly and do not pass the raw signature directly to a cryptography API expecting DER.
+
 The Worker signs the token with the private key. Apps never need the private key and never need the Flutterwave Secret Key.
 
 ## Recommended app flow
