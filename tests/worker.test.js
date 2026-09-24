@@ -205,6 +205,30 @@ test("restore rejects a payment with the wrong amount", async () => {
   }
 });
 
+test("restore reports an unpaid hosted checkout as pending", async () => {
+  const { env, restore } = await setup();
+  try {
+    const checkoutResponse = await checkout(env, "lifetime");
+    const recovery = (await checkoutResponse.json()).recovery_id;
+    const original = globalThis.fetch;
+    globalThis.fetch = async (input, init) => {
+      if (String(input).includes("verify_by_reference")) {
+        return new Response(JSON.stringify({ data: { id: 1, tx_ref: recovery, status: "pending", amount: 50000, currency: "USD" } }), { status: 200 });
+      }
+      return original(input, init);
+    };
+    const response = await worker.fetch(request("/restore", {
+      method: "POST",
+      body: JSON.stringify({ recovery_id: recovery, app_id: "com.example.app" }),
+    }), env, { waitUntil() {} });
+    assert.equal(response.status, 202);
+    assert.equal((await response.json()).error, "payment_pending");
+    globalThis.fetch = original;
+  } finally {
+    restore();
+  }
+});
+
 test("webhook rejects a bad hash and deduplicates a refund event", async () => {
   const { env, restore } = await setup();
   try {

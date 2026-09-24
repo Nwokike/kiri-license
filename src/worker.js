@@ -140,10 +140,14 @@ async function recoverFromProvider(config, env, recoveryId) {
   try {
     payment = await verifyByReference(apiEnv(config, env), recoveryId);
   } catch (error) {
-    if (error instanceof FlutterwaveError && error.status === 404) {
+    if (error instanceof FlutterwaveError && (error.status === 400 || error.status === 404)) {
       return { error: publicError(404, "license_not_found") };
     }
     return { error: publicError(502, "verification_unavailable") };
+  }
+  const paymentStatus = String(payment?.status || "").toLowerCase();
+  if (["pending", "initiated", "requires_action"].includes(paymentStatus)) {
+    return { error: publicError(202, "payment_pending") };
   }
   if (!paymentMatches(payment, product)) return { error: publicError(402, "payment_not_valid") };
   const record = await recordFromVerifiedPayment(config, env, product, recoveryId, payment);
