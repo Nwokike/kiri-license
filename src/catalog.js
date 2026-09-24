@@ -1,0 +1,31 @@
+export const DEFAULT_CATALOG = {
+  monthly: {
+    code: "M",
+    kind: "recurring",
+    interval: "monthly",
+    amount: 3.99,
+    currency: "USD",
+    paymentPlanId: null,
+    scope: "universal",
+    description: "Monthly access",
+  },
+  yearly: {
+    code: "Y",
+    kind: "recurring",
+    interval: "yearly",
+    amount: 24.99,
+    currency: "USD",
+    paymentPlanId: null,
+    scope: "universal",
+    description: "Yearly access",
+  },
+  lifetime: {
+    code: "L",
+    kind: "one_time",
+    amount: 49.99,
+    currency: "USD",
+    paymentPlanId: null,
+    scope: "universal",
+    description: "Lifetime access",
+  },
+};

@@ -1,9 +1,15 @@
 # Copy to .dev.vars for local `wrangler dev`; never commit the real file.
+# The catalog defaults are already 3.99/24.99/49.99 USD in src/catalog.js.
+# Add the two Flutterwave Payment Plan IDs when testing auto-renewal.
+FLW_MONTHLY_PLAN_ID=
+FLW_YEARLY_PLAN_ID=
+
+# Secrets: enter these directly in Cloudflare Worker Secrets.
 FLW_SECRET_KEY=FLWSECK_TEST-replace-me
 FLW_WEBHOOK_HASH=replace-with-flutterwave-secret-hash
 LICENSE_PRIVATE_KEY=base64url-pkcs8-private-key
-LICENSE_PUBLIC_KEY=base64url-spki-public-key
-CATALOG_JSON={"monthly":{"code":"M","kind":"recurring","interval":"monthly","amount":499,"currency":"USD","paymentPlanId":null,"scope":"universal","description":"Monthly access"},"yearly":{"code":"Y","kind":"recurring","interval":"yearly","amount":4999,"currency":"USD","paymentPlanId":null,"scope":"universal","description":"Yearly access"},"lifetime":{"code":"L","kind":"one_time","amount":9999,"currency":"USD","paymentPlanId":null,"scope":"universal","description":"Lifetime access"}}
+
+# The matching public key is for the app/client and is not a Worker secret.
 ALLOWED_ORIGINS=http://localhost:5173
 SUCCESS_URL=http://localhost:5173/success
 DEFAULT_SCOPE=universal

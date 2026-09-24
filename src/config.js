@@ -1,3 +1,5 @@
+import { DEFAULT_CATALOG } from "./catalog.js";
+
 export const SERVICE_VERSION = "0.1.0";
 
 const DEFAULT_GRACE_DAYS = 3;
@@ -65,7 +67,16 @@ export function normalizeCatalog(value) {
 }
 
 export function getConfig(env = {}) {
-  const catalog = normalizeCatalog(env.CATALOG_JSON);
+  const catalog = normalizeCatalog(env.CATALOG_JSON || DEFAULT_CATALOG);
+  const planOverrides = {
+    monthly: env.FLW_MONTHLY_PLAN_ID,
+    yearly: env.FLW_YEARLY_PLAN_ID,
+  };
+  for (const [id, planId] of Object.entries(planOverrides)) {
+    if (catalog[id] && planId != null && String(planId).trim()) {
+      catalog[id].paymentPlanId = String(planId).trim();
+    }
+  }
   const products = Object.values(catalog);
   const allowedOrigins = typeof env.ALLOWED_ORIGINS === "string"
     ? env.ALLOWED_ORIGINS.split(",").map((item) => item.trim()).filter(Boolean)

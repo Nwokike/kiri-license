@@ -15,7 +15,7 @@ Flutter/Flet app
     <- signed entitlement token for local use
 ```
 
-Supported products are configured in `CATALOG_JSON`:
+Supported products are configured in `src/catalog.js` by default and can be overridden with `CATALOG_JSON`:
 
 - `monthly`: recurring Flutterwave Payment Plan, or prepaid one-time mode.
 - `yearly`: recurring Flutterwave Payment Plan, or prepaid one-time mode.
@@ -103,13 +103,13 @@ npm run check
 npm run dev
 ```
 
-Set real values in `.dev.vars`; never commit that file. The sample catalog contains test amounts only. Replace it with the production catalog in Cloudflare.
+Set real values in `.dev.vars`; never commit that file. The default catalog is 3.99 USD monthly, 24.99 USD yearly, and 49.99 USD lifetime. Add the two Flutterwave Payment Plan IDs to `.dev.vars` or Cloudflare variables when enabling auto-renewal.
 
 For a local KV binding, create a namespace and add its ID under `[[kv_namespaces]]` in `wrangler.toml`, or use the Cloudflare dashboard binding.
 
 ## Security
 
-- Flutterwave Secret Key, Webhook Secret Hash, and the license private key are Worker Secrets.
+- The Worker Secrets are `FLW_SECRET_KEY`, `FLW_WEBHOOK_HASH`, and `LICENSE_PRIVATE_KEY`. The matching public key is for app-side offline verification and is not a Worker secret.
 - Redirect/query status is never treated as proof of payment.
 - Amount, currency, reference, product, and successful provider status are checked server-side.
 - Restore and checkout are rate-limited by a hashed client identifier.

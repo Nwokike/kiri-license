@@ -2,11 +2,9 @@ name = "kiri-license"
 main = "index.js"
 compatibility_date = "2026-05-13"
 
-# Replace this placeholder with the production namespace ID created in Cloudflare.
-# The preview_id can be supplied by Wrangler when the namespace is created.
-# [[kv_namespaces]]
-# binding = "ENT"
-# id = "REPLACE_WITH_ENT_NAMESPACE_ID"
+[[kv_namespaces]]
+binding = "ENT"
+id = "feac1f51938342168a23ea5bbfa84b05"
 
 [observability]
 enabled = true

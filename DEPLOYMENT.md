@@ -50,28 +50,28 @@ Set these as **Secrets** under Worker → Settings → Variables and Secrets:
 FLW_SECRET_KEY
 FLW_WEBHOOK_HASH
 LICENSE_PRIVATE_KEY
-LICENSE_PUBLIC_KEY
 ```
 
-`LICENSE_PRIVATE_KEY` and `LICENSE_PUBLIC_KEY` are generated locally:
+`LICENSE_PRIVATE_KEY` is generated locally:
 
 ```bash
 npm run keys
 ```
 
-The private value goes only into `LICENSE_PRIVATE_KEY`. Never put it in `wrangler.toml`, an app, or GitHub.
+The command prints a private key and a matching public key. Put the private value only into `LICENSE_PRIVATE_KEY`. The public key is for the app/client to verify offline entitlements; it is not a Worker secret and does not need to be entered in Cloudflare. Never put the private value in `wrangler.toml`, an app, or GitHub.
 
 Set these as ordinary variables:
 
 ```text
-CATALOG_JSON
+FLW_MONTHLY_PLAN_ID
+FLW_YEARLY_PLAN_ID
 ALLOWED_ORIGINS
 SUCCESS_URL
 DEFAULT_SCOPE
 GRACE_DAYS
 ```
 
-`CATALOG_JSON` is the single source of truth for the Worker-side product IDs, prices, currency, intervals, and Payment Plan IDs. Start from `catalog.example.json`, but replace the null values with the real catalog before live checkout.
+The source catalog already uses the selected prices: 3.99 USD monthly, 24.99 USD yearly, and 49.99 USD lifetime. `FLW_MONTHLY_PLAN_ID` and `FLW_YEARLY_PLAN_ID` are the only missing catalog values. `CATALOG_JSON` is an optional full-catalog override for advanced use.
 
 ## 5. Add the custom domain
 
