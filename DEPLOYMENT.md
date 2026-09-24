@@ -65,13 +65,14 @@ Set these as ordinary variables:
 ```text
 FLW_MONTHLY_PLAN_ID
 FLW_YEARLY_PLAN_ID
+LICENSE_PUBLIC_KEY
 ALLOWED_ORIGINS
 SUCCESS_URL
 DEFAULT_SCOPE
 GRACE_DAYS
 ```
 
-The source catalog already uses the selected prices: 3.99 USD monthly, 24.99 USD yearly, and 49.99 USD lifetime. `FLW_MONTHLY_PLAN_ID` and `FLW_YEARLY_PLAN_ID` are the only missing catalog values. `CATALOG_JSON` is an optional full-catalog override for advanced use.
+The public key and plan IDs are already committed in `wrangler.toml` for this private deployment. `LICENSE_PUBLIC_KEY` is non-secret and may be shipped in app clients. The source catalog already uses the selected prices: 3.99 USD monthly, 24.99 USD yearly, and 49.99 USD lifetime. `CATALOG_JSON` is an optional full-catalog override for advanced use.
 
 ## 5. Add the custom domain
 
@@ -103,16 +104,34 @@ Yearly: interval=yearly
 Duration: leave omitted for renew-until-cancel
 ```
 
-6. Put the plan IDs into `CATALOG_JSON`.
-7. Open Flutterwave Webhook settings.
-8. Set the webhook URL:
+6. Set the plan IDs in the Worker variables:
+
+```text
+FLW_MONTHLY_PLAN_ID = 170277
+FLW_YEARLY_PLAN_ID = 170278
+```
+
+7. Open Flutterwave **Settings → Webhooks**.
+8. Set the webhook URL. Before the custom domain is active, use the temporary `https://<worker>.<account-subdomain>.workers.dev/webhook` URL. After the custom domain is attached, use:
 
 ```text
 https://license.kiri.ng/webhook
 ```
 
 9. Copy the Flutterwave Secret Hash into Cloudflare as `FLW_WEBHOOK_HASH`.
-10. Enable successful-charge and subscription-cancellation events. Refund and chargeback webhook delivery may require Flutterwave support to enable.
+10. Save the webhook configuration.
+
+For the Worker to receive the events it handles, use these Live Webhook preferences:
+
+- **Receive webhook response in JSON format:** ON.
+- **Enable webhook retries:** ON.
+- **Enable v3 webhooks:** ON.
+- **Enable resend webhook from the dashboard:** ON is recommended.
+- **Add meta to webhook:** optional; not required by this Worker.
+- **Enable payout subaccounts wallet funding hook:** leave OFF.
+- **Webhook preferences with custom URL:** leave OFF unless you intentionally operate a second endpoint.
+
+The Worker only needs the payment/subscription webhook URL. It does not need payout or wallet-funding events. Enable refund and chargeback webhook delivery separately if Flutterwave support requires it.
 
 Use Test mode and the documented test cards before using Live mode.
 

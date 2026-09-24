@@ -6,5 +6,10 @@ compatibility_date = "2026-05-13"
 binding = "ENT"
 id = "feac1f51938342168a23ea5bbfa84b05"
 
+[vars]
+LICENSE_PUBLIC_KEY = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE-YfZ-yKdG3wYF1IR0XcpJH4RclABnddMmAGXFI2J8sbC4gWY2POKc8hVrn0_uHxDZ9ufzwzg4buUimW-IEw4Uw"
+FLW_MONTHLY_PLAN_ID = "170277"
+FLW_YEARLY_PLAN_ID = "170278"
+
 [observability]
 enabled = true

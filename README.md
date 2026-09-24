@@ -54,7 +54,7 @@ Response:
   "checkout_url": "https://checkout.flutterwave.com/...",
   "product": "lifetime",
   "status": "pending",
-  "amount": 9999,
+  "amount": 49.99,
   "currency": "USD"
 }
 ```
@@ -122,4 +122,5 @@ The existing `flet-billing` package remains responsible for Play Billing and Sto
 
 ## Documentation
 
-See [`DEPLOYMENT.md`](DEPLOYMENT.md) for Cloudflare Git integration, KV, custom domain, secrets, Flutterwave Test/Live setup, and rollback.
+- [`docs/client-integration.md`](docs/client-integration.md) is the contract for building and integrating every app client.
+- [`DEPLOYMENT.md`](DEPLOYMENT.md) covers Cloudflare Git integration, KV, custom domain, secrets, Flutterwave Test/Live setup, and rollback.
