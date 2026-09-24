@@ -1,0 +1,32 @@
+{
+  "monthly": {
+    "code": "M",
+    "kind": "recurring",
+    "interval": "monthly",
+    "amount": null,
+    "currency": "USD",
+    "paymentPlanId": null,
+    "scope": "universal",
+    "description": "Monthly access"
+  },
+  "yearly": {
+    "code": "Y",
+    "kind": "recurring",
+    "interval": "yearly",
+    "amount": null,
+    "currency": "USD",
+    "paymentPlanId": null,
+    "scope": "universal",
+    "description": "Yearly access"
+  },
+  "lifetime": {
+    "code": "L",
+    "kind": "one_time",
+    "interval": null,
+    "amount": null,
+    "currency": "USD",
+    "paymentPlanId": null,
+    "scope": "universal",
+    "description": "Lifetime access"
+  }
+}

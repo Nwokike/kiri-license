@@ -1,0 +1,18 @@
+{
+  "name": "kiri-license",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Kiri's privacy-preserving Flutterwave entitlement Worker.",
+  "scripts": {
+    "test": "node --test \"tests/**/*.test.js\"",
+    "test:watch": "node --test --watch \"tests/**/*.test.js\"",
+    "keys": "node tools/generate-keys.mjs",
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "check": "node --check index.js && node --check src/config.js && node --check src/entitlements.js && node --check src/flutterwave.js && node --check src/http.js && node --check src/token.js && node --check src/worker.js"
+  },
+  "devDependencies": {
+    "wrangler": "4.138.0"
+  }
+}
