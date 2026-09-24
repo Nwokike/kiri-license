@@ -58,8 +58,13 @@ export async function createPayment(env, input) {
     body: JSON.stringify(body),
   });
   const data = response?.data;
-  if (!data?.link || !data?.id) throw new FlutterwaveError("Flutterwave returned no checkout link", 502, response);
-  return { link: data.link, id: String(data.id), txRef: data.tx_ref || input.txRef, raw: data };
+  if (!data?.link) throw new FlutterwaveError("Flutterwave returned no checkout link", 502, response);
+  return {
+    link: data.link,
+    id: data.id == null ? null : String(data.id),
+    txRef: data.tx_ref || input.txRef,
+    raw: data,
+  };
 }
 
 export async function verifyByReference(env, txRef) {

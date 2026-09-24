@@ -94,7 +94,7 @@ async function setup() {
     calls.push({ url, init });
     if (url.endsWith("/payments") && init.method === "POST") {
       const body = JSON.parse(init.body);
-      return new Response(JSON.stringify({ status: "success", data: { id: 1001, link: `https://checkout.test/${body.tx_ref}`, tx_ref: body.tx_ref } }), { status: 200 });
+      return new Response(JSON.stringify({ status: "success", message: "Hosted Link", data: { link: `https://checkout.test/${body.tx_ref}`, tx_ref: body.tx_ref } }), { status: 200 });
     }
     if (url.includes("/transactions/verify_by_reference")) {
       const ref = new URL(url).searchParams.get("tx_ref");
