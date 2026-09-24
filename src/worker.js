@@ -205,7 +205,17 @@ async function handleCheckout(request, config, env) {
     }, 201);
   } catch (error) {
     const status = error instanceof FlutterwaveError && error.status >= 400 && error.status < 500 ? error.status : 502;
-    console.error("checkout_failed", { status, providerStatus: error instanceof FlutterwaveError ? error.status : null });
+    const providerMessage = error instanceof FlutterwaveError
+      && error.details
+      && typeof error.details.message === "string"
+      ? error.details.message.slice(0, 160)
+      : null;
+    console.error("checkout_failed", {
+      status,
+      providerStatus: error instanceof FlutterwaveError ? error.status : null,
+      providerClass: error instanceof FlutterwaveError && error.details ? "api_response" : "network_or_timeout",
+      providerMessage,
+    });
     return errorResponse(config, request, status, "checkout_failed");
   }
 }
