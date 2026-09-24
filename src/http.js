@@ -23,6 +23,15 @@ export function jsonResponse(config, request, data, status = 200, options = {}) 
   return new Response(JSON.stringify(data, null, 2), { status, headers });
 }
 
+export function htmlResponse(config, request, html, options = {}) {
+  const headers = {
+    "Content-Type": "text/html; charset=utf-8",
+    ...corsHeaders(config, request, options.publicRoute),
+    ...(options.headers || {}),
+  };
+  return new Response(html, { status: options.status || 200, headers });
+}
+
 export function errorResponse(config, request, status, code, options = {}) {
   return jsonResponse(config, request, { error: code }, status, options);
 }

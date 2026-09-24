@@ -38,7 +38,7 @@ import {
   verifyByReference,
   webhookSecretMatches,
 } from "./flutterwave.js";
-import { corsHeaders, errorResponse, jsonResponse, methodNotAllowed, readJson } from "./http.js";
+import { corsHeaders, errorResponse, htmlResponse, jsonResponse, methodNotAllowed, readJson } from "./http.js";
 import { signEntitlement } from "./token.js";
 
 function clientId(request) {
@@ -205,6 +205,7 @@ async function handleCheckout(request, config, env) {
     }, 201);
   } catch (error) {
     const status = error instanceof FlutterwaveError && error.status >= 400 && error.status < 500 ? error.status : 502;
+    console.error("checkout_failed", { status, providerStatus: error instanceof FlutterwaveError ? error.status : null });
     return errorResponse(config, request, status, "checkout_failed");
   }
 }
@@ -368,6 +369,9 @@ export default {
       }
       if (method === "GET" && path === "/catalog") {
         return jsonResponse(config, request, { products: publicCatalog(config) }, 200, { publicRoute: true });
+      }
+      if (method === "GET" && path === "/success") {
+        return htmlResponse(config, request, `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kiri payment received</title></head><body><main><h1>Payment received</h1><p>Return to the Kiri app to finish restoring your license.</p></main></body></html>`, { publicRoute: true });
       }
       if (path === "/checkout" || path === "/v1/checkout") {
         if (method !== "POST") return methodNotAllowed(config, request, ["POST"]);

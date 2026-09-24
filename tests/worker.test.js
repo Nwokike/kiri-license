@@ -317,6 +317,17 @@ test("OPTIONS includes the configured CORS origin", async () => {
   }
 });
 
+test("GET /success renders the post-checkout return page", async () => {
+  const { env, restore } = await setup();
+  try {
+    const response = await worker.fetch(request("/success"), env, { waitUntil() {} });
+    assert.equal(response.status, 200);
+    assert.match(await response.text(), /Payment received/);
+  } finally {
+    restore();
+  }
+});
+
 test("unknown routes and methods return structured errors", async () => {
   const { env, restore } = await setup();
   try {
