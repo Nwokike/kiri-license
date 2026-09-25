@@ -32,6 +32,8 @@ import {
   FlutterwaveError,
   paymentIsSuccessful,
   paymentMatches,
+  getPlan,
+  listPlans,
   paymentPaidThrough,
   subscriptionByTransactionId,
   verifyById,
@@ -375,6 +377,25 @@ export default {
     try {
       if (method === "OPTIONS") {
         return new Response(null, { status: 204, headers: corsHeaders(config, request, false) });
+      }
+      if (method === "GET" && path === "/plan-check") {
+        // Diagnostic: the hosted checkout reports "Payment plan does not
+        // exist" without an error code, so ask the API directly with the
+        // same secret key the charge is created with.
+        const product = new URL(request.url).searchParams.get("product") || "monthly";
+        const catalogProduct = productForId(config, product);
+        if (!catalogProduct) {
+          return jsonResponse(config, request, { product, note: "unknown product" }, 404, { publicRoute: true });
+        }
+        if (!catalogProduct.paymentPlanId) {
+          return jsonResponse(config, request, { product, planId: null, note: "no plan configured (one-time charge)" }, 200, { publicRoute: true });
+        }
+        const plan = await getPlan(env, catalogProduct.paymentPlanId);
+        if (plan.resolved === false) {
+          const visible = await listPlans(env);
+          return jsonResponse(config, request, { product, ...plan, visiblePlans: visible }, 200, { publicRoute: true });
+        }
+        return jsonResponse(config, request, { product, ...plan }, 200, { publicRoute: true });
       }
       if (method === "GET" && path === "/health") {
         const body = handleHealth(config);

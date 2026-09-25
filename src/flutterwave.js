@@ -150,3 +150,82 @@ export function paymentPaidThrough(payment, product, now = Date.now()) {
   if (product.interval === "yearly") return now + 365 * 24 * 60 * 60 * 1000;
   return now;
 }
+
+
+/**
+ * Look a Payment Plan up as Flutterwave's own hosted checkout does.
+ *
+ * The hosted page resolves payment_plan at render time and reports
+ * "Payment plan does not exist" without telling the caller why — so we ask
+ * the API directly with the same secret key the charge was created with.
+ */
+export async function getPlan(env, planId) {
+  try {
+    const body = await requestJson(
+      `${env.FLW_API_BASE || "https://api.flutterwave.com/v3"}/payment-plans/${encodeURIComponent(planId)}`,
+      { method: "GET", headers: authHeaders(env.FLW_SECRET_KEY) },
+    );
+    const plan = body?.data;
+    return {
+      resolved: true,
+      planId: String(planId),
+      status: plan?.status ?? null,
+      amount: plan?.amount ?? null,
+      currency: plan?.currency ?? null,
+      interval: plan?.interval ?? null,
+      message: body?.message ?? null,
+    };
+  } catch (ex) {
+    return {
+      resolved: false,
+      planId: String(planId),
+      httpStatus: ex?.status ?? null,
+      message: ex?.message ?? String(ex),
+      details: ex?.details ?? null,
+    };
+  }
+}
+
+
+/**
+ * List the plans this key can actually see — used when a configured plan
+ * id is not found, because a plan created in the other environment (live
+ * vs test) is invisible to this key while still showing as Active on the
+ * dashboard.
+ */
+export async function listPlans(env) {
+  try {
+    const base = `${env.FLW_API_BASE || "https://api.flutterwave.com/v3"}/payment-plans`;
+    const rows = [];
+    for (const query of ["?status=all", "?status=active", ""]) {
+      try {
+        const body = await requestJson(`${base}${query}`, {
+          method: "GET",
+          headers: authHeaders(env.FLW_SECRET_KEY),
+        });
+        const data = Array.isArray(body?.data) ? body.data : body?.data ? [body.data] : [];
+        for (const row of data) rows.push(row);
+      } catch {
+        // Some filters are rejected outright; keep trying the others.
+      }
+    }
+    const seen = new Set();
+    return rows
+      .filter((plan) => {
+        const id = plan?.id ?? null;
+        if (id == null || seen.has(id)) return false;
+        seen.add(id);
+        return true;
+      })
+      .map((plan) => ({
+      id: plan?.id ?? null,
+      status: plan?.status ?? null,
+      interval: plan?.interval ?? null,
+      amount: plan?.amount ?? null,
+      currency: plan?.currency ?? null,
+      created_at: plan?.created_at ?? null,
+    }));
+  } catch (ex) {
+    return { error: ex?.message ?? String(ex), httpStatus: ex?.status ?? null };
+  }
+}
