@@ -51,7 +51,13 @@ export async function createPayment(env, input) {
   };
   if (input.name) body.customer.name = input.name;
   if (input.phoneNumber) body.customer.phonenumber = input.phoneNumber;
-  if (input.paymentPlanId) body.payment_plan = input.paymentPlanId;
+  if (input.paymentPlanId) {
+    // Flutterwave's `payment_plan` is an integer ID. Sending the config
+    // string verbatim leaves the hosted page unable to resolve the plan
+    // ("Payment plan does not exist") even though the charge was created.
+    const planId = Number(String(input.paymentPlanId).trim());
+    if (Number.isInteger(planId) && planId > 0) body.payment_plan = planId;
+  }
   const response = await requestJson(`${env.FLW_API_BASE || "https://api.flutterwave.com/v3"}/payments`, {
     method: "POST",
     headers: authHeaders(env.FLW_SECRET_KEY),
