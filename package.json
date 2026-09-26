@@ -10,7 +10,7 @@
     "keys": "node tools/generate-keys.mjs",
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "check": "node --check index.js && node --check src/config.js && node --check src/entitlements.js && node --check src/flutterwave.js && node --check src/http.js && node --check src/token.js && node --check src/worker.js"
+    "check": "node --check index.js && node --check src/config.js && node --check src/entitlements.js && node --check src/flutterwave.js && node --check src/http.js && node --check src/receipt.js && node --check src/smtp.js && node --check src/success-page.js && node --check src/token.js && node --check src/worker.js"
   },
   "devDependencies": {
     "wrangler": "4.138.0"

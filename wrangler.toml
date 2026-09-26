@@ -8,8 +8,11 @@ id = "feac1f51938342168a23ea5bbfa84b05"
 
 [vars]
 LICENSE_PUBLIC_KEY = "MFkwEwYHKoZIzj0CAQYIKoZIzj0DAQcDQgAE-YfZ-yKdG3wYF1IR0XcpJH4RclABnddMmAGXFI2J8sbC4gWY2POKc8hVrn0_uHxDZ9ufzwzg4buUimW-IEw4Uw"
-FLW_MONTHLY_PLAN_ID = "170277"
-FLW_YEARLY_PLAN_ID = "170278"
+FLW_MONTHLY_PLAN_ID = "244112"
+FLW_YEARLY_PLAN_ID = "244113"
+# Brevo SMTP login (Settings → SMTP shows the current value). The password is
+# the BREVO_SMTP_KEY secret — never committed: `npx wrangler secret put BREVO_SMTP_KEY`.
+BREVO_EMAIL_USER = "support@kiri.ng"
 
 [observability]
 enabled = true

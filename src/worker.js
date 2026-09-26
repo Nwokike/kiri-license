@@ -15,6 +15,7 @@ import {
   nowMs,
   parseRecoveryId,
   putMapping,
+  readPending,
   readRecord,
   recoveryHash,
   resolveEntHash,
@@ -41,6 +42,8 @@ import {
   webhookSecretMatches,
 } from "./flutterwave.js";
 import { corsHeaders, errorResponse, htmlResponse, jsonResponse, methodNotAllowed, readJson } from "./http.js";
+import { sendReceipt } from "./receipt.js";
+import { renderSuccessPage } from "./success-page.js";
 import { signEntitlement } from "./token.js";
 
 function clientId(request) {
@@ -56,6 +59,44 @@ function apiEnv(config, env) {
 function productFromRecovery(config, recoveryId) {
   const parsed = parseRecoveryId(recoveryId);
   return parsed ? productForCode(config, parsed.code) : null;
+}
+
+// Flutterwave appends status/tx_ref/transaction_id to whatever we put here;
+// the caller's app_id travels in the fragment so their query-append cannot
+// collide with ours (and fragments never hit our logs).
+function successRedirectUrl(config, appId) {
+  const base = config.successUrl;
+  if (!appId) return base;
+  return base.includes("#") ? base : `${base}#app_id=${encodeURIComponent(String(appId))}`;
+}
+
+// One receipt per transaction. The receiptTxId claim is written BEFORE the
+// network send so a concurrent duplicate (browser page and app watcher can
+// both trigger on-demand recovery at the same moment) reads the claim and
+// skips. Never throws — receipts must not break /restore or the webhook.
+async function maybeSendReceipt(config, env, record, { recoveryId, paymentId, fallbackEmail }) {
+  try {
+    const txId = paymentId == null ? "" : String(paymentId);
+    const current = (await readRecord(env.ENT, record.ent)) || record;
+    const id = recoveryId || current.recoveryId || "";
+    if (!txId || !id) {
+      console.info("receipt_skipped", { reason: "missing_transaction_or_id" });
+      return;
+    }
+    if (current.receiptTxId === txId) return;
+    current.receiptTxId = txId;
+    await writeRecord(env.ENT, current);
+    const to = current.email || fallbackEmail || "";
+    if (!to) {
+      console.info("receipt_skipped", { reason: "no_email", txId });
+      return;
+    }
+    const product = productForId(config, current.product);
+    if (!product) return;
+    await sendReceipt(env, { to, product, recoveryId: id, paidThrough: current.paidThrough });
+  } catch (error) {
+    console.error("receipt_send_failed", { message: String((error && error.message) || error) });
+  }
 }
 
 function publicError(status, code) {
@@ -118,6 +159,7 @@ async function refreshSubscription(config, env, record) {
 
 async function recordFromVerifiedPayment(config, env, product, recoveryId, payment) {
   const hash = await recoveryHash(recoveryId);
+  const pending = await readPending(env.ENT, hash);
   const record = {
     ...newRecord({ product, hash, scope: product.scope, recoveryCode: parseRecoveryId(recoveryId)?.code }),
     flwTransactionId: payment.id == null ? null : String(payment.id),
@@ -125,6 +167,10 @@ async function recordFromVerifiedPayment(config, env, product, recoveryId, payme
     flwSubscriptionId: payment.subscription_id == null ? null : String(payment.subscription_id),
     paidThrough: paymentPaidThrough(payment, product),
     subscriptionStatus: product.kind === "recurring" ? "active" : null,
+    email: pending && typeof pending.email === "string" ? pending.email : null,
+    // Full ID kept on the record so renewal receipts never depend on the
+    // webhook echoing tx_ref (it does today; it might not tomorrow).
+    recoveryId,
     updatedAt: nowMs(),
   };
   if (record.flwSubscriptionId) {
@@ -132,6 +178,7 @@ async function recordFromVerifiedPayment(config, env, product, recoveryId, payme
   }
   await putMapping(env.ENT, await txKey(recoveryId), hash);
   await writeRecord(env.ENT, record);
+  await maybeSendReceipt(config, env, record, { recoveryId, paymentId: payment.id });
   return record;
 }
 
@@ -188,7 +235,7 @@ async function handleCheckout(request, config, env) {
   }
   const recoveryId = makeRecoveryId(product.code);
   const hash = await recoveryHash(recoveryId);
-  await storeCheckout(env.ENT, { hash, txRef: recoveryId, product, scope: product.scope });
+  await storeCheckout(env.ENT, { hash, txRef: recoveryId, product, scope: product.scope, email: body.email });
   try {
     const payment = await createPayment(apiEnv(config, env), {
       txRef: recoveryId,
@@ -197,7 +244,7 @@ async function handleCheckout(request, config, env) {
       email: body.email,
       name: typeof body.name === "string" ? body.name.slice(0, 120) : undefined,
       phoneNumber: typeof body.phone_number === "string" ? body.phone_number.slice(0, 40) : undefined,
-      redirectUrl: config.successUrl,
+      redirectUrl: successRedirectUrl(config, body.app_id),
       paymentPlanId: product.paymentPlanId,
       meta: { app_id: body.app_id, product_id: product.id, entitlement_version: 1 },
     });
@@ -322,6 +369,11 @@ async function processWebhook(config, env, payload) {
     }
     record.updatedAt = at;
     await writeRecord(env.ENT, record);
+    await maybeSendReceipt(config, env, record, {
+      recoveryId: data.tx_ref || payload?.tx_ref || "",
+      paymentId: record.flwTransactionId,
+      fallbackEmail: data.customer && data.customer.email,
+    });
     return { matched: true, updated: true, status: "active" };
   }
 
@@ -406,7 +458,10 @@ export default {
         return jsonResponse(config, request, { products: publicCatalog(config) }, 200, { publicRoute: true });
       }
       if (method === "GET" && path === "/success") {
-        return htmlResponse(config, request, `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Kiri payment received</title></head><body><main><h1>Payment received</h1><p>Return to the Kiri app to finish restoring your license.</p></main></body></html>`, { publicRoute: true });
+        return htmlResponse(config, request, renderSuccessPage(config, {
+          status: url.searchParams.get("status") || "",
+          txRef: url.searchParams.get("tx_ref") || "",
+        }), { publicRoute: true });
       }
       if (path === "/checkout" || path === "/v1/checkout") {
         if (method !== "POST") return methodNotAllowed(config, request, ["POST"]);

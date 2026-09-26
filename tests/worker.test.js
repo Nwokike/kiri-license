@@ -121,6 +121,56 @@ async function checkout(env, product = "lifetime") {
   }), env, { waitUntil() {} });
 }
 
+// Scripted SMTP server: socket 0 speaks plaintext (greeting, EHLO,
+// STARTTLS), the socket returned by startTls() speaks the authenticated
+// half. Everything written by the client lands in `written` for assertions.
+function smtpHarness() {
+  const encoder = new TextEncoder();
+  const decoder = new TextDecoder();
+  const written = [];
+  let connects = 0;
+  const replies = [
+    "220 smtp-relay.brevo.com ready\r\n250-smtp-relay.brevo.com\r\n250 SIZE 10485760\r\n220 begin tls\r\n",
+    "250-smtp\r\n250 OK\r\n334 VXNlcm5hbWU6\r\n334 UGFzc3dvcmQ6\r\n235 ok\r\n250 ok\r\n250 ok\r\n354 data\r\n250 queued\r\n",
+  ];
+  function makeSocket(index) {
+    return {
+      opened: Promise.resolve({}),
+      readable: new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode(replies[index]));
+          controller.close();
+        },
+      }),
+      writable: new WritableStream({
+        write(chunk) {
+          written.push(decoder.decode(chunk));
+        },
+      }),
+      startTls() {
+        return makeSocket(index + 1);
+      },
+      close() {},
+    };
+  }
+  return {
+    connect() {
+      connects += 1;
+      return makeSocket(0);
+    },
+    written,
+    count: () => connects,
+  };
+}
+
+function enableSmtp(env) {
+  env.BREVO_EMAIL_USER = "support@kiri.ng";
+  env.BREVO_SMTP_KEY = "smtpkey_test_value";
+  const harness = smtpHarness();
+  globalThis.__kiri_smtp_connect = harness.connect;
+  return harness;
+}
+
 test("health and catalog are public and never expose secrets", async () => {
   const { env, restore } = await setup();
   try {
@@ -360,6 +410,209 @@ test("unknown routes and methods return structured errors", async () => {
     assert.equal((await missing.json()).error, "not_found");
     const wrongMethod = await worker.fetch(request("/checkout"), env, { waitUntil() {} });
     assert.equal(wrongMethod.status, 405);
+  } finally {
+    restore();
+  }
+});
+
+test("checkout redirect carries the caller's app in the fragment", async () => {
+  const { env, calls, restore } = await setup();
+  try {
+    const response = await checkout(env, "monthly");
+    assert.equal(response.status, 201);
+    const payment = JSON.parse(calls[0].init.body);
+    assert.equal(
+      payment.redirect_url,
+      "https://license.kiri.ng/success#app_id=com.example.app",
+    );
+  } finally {
+    restore();
+  }
+});
+
+test("receipt email is sent once over SMTP with the recovery ID, then deduped", async () => {
+  const { env, restore } = await setup();
+  const harness = enableSmtp(env);
+  try {
+    const checkoutResponse = await checkout(env, "lifetime");
+    const recovery = (await checkoutResponse.json()).recovery_id;
+    const first = await worker.fetch(request("/restore", {
+      method: "POST",
+      body: JSON.stringify({ recovery_id: recovery, app_id: "com.example.app" }),
+    }), env, { waitUntil() {} });
+    assert.equal(first.status, 200);
+    assert.equal(harness.count(), 1);
+    const transcript = harness.written.join("");
+    assert.match(transcript, /MAIL FROM:<support@kiri\.ng>/);
+    assert.match(transcript, /RCPT TO:<buyer@example\.com>/);
+    assert.match(transcript, new RegExp(recovery.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.match(transcript, /Payment received/);
+    assert.match(transcript, /Kiri Research Labs/);
+
+    // Second restore (record now exists) must not re-send.
+    const second = await worker.fetch(request("/restore", {
+      method: "POST",
+      body: JSON.stringify({ recovery_id: recovery, app_id: "com.example.app" }),
+    }), env, { waitUntil() {} });
+    assert.equal(second.status, 200);
+    assert.equal(harness.count(), 1);
+  } finally {
+    delete globalThis.__kiri_smtp_connect;
+    restore();
+  }
+});
+
+test("SMTP transport failure never breaks restore", async () => {
+  const { env, restore } = await setup();
+  env.BREVO_EMAIL_USER = "support@kiri.ng";
+  env.BREVO_SMTP_KEY = "smtpkey_test_value";
+  globalThis.__kiri_smtp_connect = () => {
+    throw new Error("connection refused");
+  };
+  try {
+    const checkoutResponse = await checkout(env, "lifetime");
+    const recovery = (await checkoutResponse.json()).recovery_id;
+    const response = await worker.fetch(request("/restore", {
+      method: "POST",
+      body: JSON.stringify({ recovery_id: recovery, app_id: "com.example.app" }),
+    }), env, { waitUntil() {} });
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).status, "active");
+  } finally {
+    delete globalThis.__kiri_smtp_connect;
+    restore();
+  }
+});
+
+test("a placeholder SMTP key skips sending without touching the socket", async () => {
+  const { env, restore } = await setup();
+  env.BREVO_EMAIL_USER = "support@kiri.ng";
+  env.BREVO_SMTP_KEY = "REPLACE-with-the-real-key";
+  const harness = smtpHarness();
+  globalThis.__kiri_smtp_connect = harness.connect;
+  try {
+    const checkoutResponse = await checkout(env, "lifetime");
+    const recovery = (await checkoutResponse.json()).recovery_id;
+    const response = await worker.fetch(request("/restore", {
+      method: "POST",
+      body: JSON.stringify({ recovery_id: recovery, app_id: "com.example.app" }),
+    }), env, { waitUntil() {} });
+    assert.equal(response.status, 200);
+    assert.equal(harness.count(), 0);
+  } finally {
+    delete globalThis.__kiri_smtp_connect;
+    restore();
+  }
+});
+
+test("webhook renewal sends a second receipt for the new transaction", async () => {
+  const { env, restore } = await setup();
+  const harness = enableSmtp(env);
+  try {
+    const checkoutResponse = await checkout(env, "monthly");
+    const recovery = (await checkoutResponse.json()).recovery_id;
+    const first = await worker.fetch(request("/restore", {
+      method: "POST",
+      body: JSON.stringify({ recovery_id: recovery, app_id: "com.example.app" }),
+    }), env, { waitUntil() {} });
+    assert.equal(first.status, 200);
+    assert.equal(harness.count(), 1);
+
+    // A late first-charge webhook for the transaction the restore already
+    // receipted must not email a duplicate.
+    const late = await worker.fetch(request("/webhook", {
+      method: "POST",
+      headers: { "verif-hash": "hook-secret", "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: "late-first-charge",
+        event: "charge.completed",
+        data: { id: 1001, subscription_id: 9001, status: "successful", amount: 1000, currency: "USD" },
+      }),
+    }), env, { waitUntil() {} });
+    assert.equal(late.status, 200);
+    assert.equal(harness.count(), 1);
+
+    const webhook = await worker.fetch(request("/webhook", {
+      method: "POST",
+      headers: { "verif-hash": "hook-secret", "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: "renewal-receipt-1",
+        event: "charge.completed",
+        // No tx_ref: the record's stored recoveryId must carry the receipt.
+        data: { id: 2001, subscription_id: 9001, status: "successful", amount: 1000, currency: "USD" },
+      }),
+    }), env, { waitUntil() {} });
+    assert.equal(webhook.status, 200);
+    assert.equal(harness.count(), 2);
+    const occurrences = harness.written.join("").match(/Payment received/g) || [];
+    assert.equal(occurrences.length, 2);
+
+    // A duplicate webhook must not email again.
+    const duplicate = await worker.fetch(request("/webhook", {
+      method: "POST",
+      headers: { "verif-hash": "hook-secret", "Content-Type": "application/json" },
+      body: JSON.stringify({
+        id: "renewal-receipt-1",
+        event: "charge.completed",
+        data: { id: 2001, subscription_id: 9001, status: "successful", amount: 1000, currency: "USD" },
+      }),
+    }), env, { waitUntil() {} });
+    assert.equal((await duplicate.json()).status, "already_processed");
+    assert.equal(harness.count(), 2);
+  } finally {
+    delete globalThis.__kiri_smtp_connect;
+    restore();
+  }
+});
+
+test("GET /success shows the recovery ID, product and live verification for a paid redirect", async () => {
+  const { env, restore } = await setup();
+  try {
+    const checkoutResponse = await checkout(env, "lifetime");
+    const recovery = (await checkoutResponse.json()).recovery_id;
+    const response = await worker.fetch(
+      request(`/success?status=successful&tx_ref=${encodeURIComponent(recovery)}&transaction_id=1001`),
+      env,
+      { waitUntil() {} },
+    );
+    assert.equal(response.status, 200);
+    const html = await response.text();
+    assert.match(html, new RegExp(recovery.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+    assert.match(html, /Lifetime license/);
+    assert.match(html, /Confirming your payment/);
+    assert.match(html, /prefers-color-scheme: dark/);
+    assert.match(html, /kiri\.ng\/static\/images\/logos/);
+    assert.match(html, /Copy/);
+    assert.equal(html.includes("flwsect_test"), false);
+  } finally {
+    restore();
+  }
+});
+
+test("GET /success reports a failed payment honestly", async () => {
+  const { env, restore } = await setup();
+  try {
+    const response = await worker.fetch(
+      request("/success?status=failed&tx_ref=KIRI-L-notapaymentreference000000"),
+      env,
+      { waitUntil() {} },
+    );
+    assert.equal(response.status, 200);
+    const html = await response.text();
+    assert.match(html, /Payment not completed/);
+    assert.match(html, /failed/);
+  } finally {
+    restore();
+  }
+});
+
+test("GET /success without a reference stays honest", async () => {
+  const { env, restore } = await setup();
+  try {
+    const response = await worker.fetch(request("/success"), env, { waitUntil() {} });
+    assert.equal(response.status, 200);
+    const html = await response.text();
+    assert.match(html, /No payment reference found/);
   } finally {
     restore();
   }

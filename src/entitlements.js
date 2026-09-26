@@ -150,13 +150,16 @@ export async function markSeen(kv, eventId) {
   return true;
 }
 
-export async function storeCheckout(kv, { hash, txRef, product, scope, now = nowMs() }) {
+export async function storeCheckout(kv, { hash, txRef, product, scope, email, now = nowMs() }) {
   if (!kv) throw new Error("ENT binding is not configured");
   const pending = {
     v: 1,
     ent: hash,
     product: product.id,
     scope: scope || product.scope || "universal",
+    // Payer address for the receipt — carried onto the entitlement record
+    // the moment the payment verifies (validated by handleCheckout first).
+    email: typeof email === "string" && email.trim() ? email.trim() : null,
     createdAt: now,
   };
   await kv.put(pendingKey(hash), JSON.stringify(pending), { expirationTtl: TEMP_TTL_SECONDS });
