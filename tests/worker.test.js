@@ -121,24 +121,22 @@ async function checkout(env, product = "lifetime") {
   }), env, { waitUntil() {} });
 }
 
-// Scripted SMTP server: socket 0 speaks plaintext (greeting, EHLO,
-// STARTTLS), the socket returned by startTls() speaks the authenticated
-// half. Everything written by the client lands in `written` for assertions.
+// Scripted SMTP server on implicit TLS (port 465 path, no STARTTLS
+// upgrade): greeting, EHLO, AUTH LOGIN challenge/response, envelope, DATA.
+// Everything written by the client lands in `written` for assertions.
 function smtpHarness() {
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
   const written = [];
   let connects = 0;
-  const replies = [
-    "220 smtp-relay.brevo.com ready\r\n250-smtp-relay.brevo.com\r\n250 SIZE 10485760\r\n220 begin tls\r\n",
-    "250-smtp\r\n250 OK\r\n334 VXNlcm5hbWU6\r\n334 UGFzc3dvcmQ6\r\n235 ok\r\n250 ok\r\n250 ok\r\n354 data\r\n250 queued\r\n",
-  ];
-  function makeSocket(index) {
+  const reply =
+    "220 smtp-relay.brevo.com ready\r\n250-smtp-relay.brevo.com\r\n250 SIZE 10485760\r\n334 VXNlcm5hbWU6\r\n334 UGFzc3dvcmQ6\r\n235 ok\r\n250 ok\r\n250 ok\r\n354 data\r\n250 queued\r\n";
+  function makeSocket() {
     return {
       opened: Promise.resolve({}),
       readable: new ReadableStream({
         start(controller) {
-          controller.enqueue(encoder.encode(replies[index]));
+          controller.enqueue(encoder.encode(reply));
           controller.close();
         },
       }),
@@ -148,7 +146,7 @@ function smtpHarness() {
         },
       }),
       startTls() {
-        return makeSocket(index + 1);
+        throw new Error("implicit TLS must not upgrade");
       },
       close() {},
     };
@@ -156,7 +154,7 @@ function smtpHarness() {
   return {
     connect() {
       connects += 1;
-      return makeSocket(0);
+      return makeSocket();
     },
     written,
     count: () => connects,
@@ -583,6 +581,11 @@ test("GET /success shows the recovery ID, product and live verification for a pa
     assert.match(html, /prefers-color-scheme: dark/);
     assert.match(html, /kiri\.ng\/static\/images\/logos/);
     assert.match(html, /Copy/);
+    // Real redirects bury status/tx_ref inside the fragment (Flutterwave
+    // appends after our #app_id); the page must resolve them client-side.
+    assert.match(html, /location\.hash/);
+    assert.match(html, /"L":"lifetime"/);
+    assert.match(html, /mailto:support@kiri\.ng/);
     assert.equal(html.includes("flwsect_test"), false);
   } finally {
     restore();
@@ -614,6 +617,62 @@ test("GET /success without a reference stays honest", async () => {
     const html = await response.text();
     assert.match(html, /No payment reference found/);
   } finally {
+    restore();
+  }
+});
+
+test("GET /mail-test sends a test note to the configured login", async () => {
+  const { env, restore } = await setup();
+  const harness = enableSmtp(env);
+  try {
+    const response = await worker.fetch(request("/mail-test"), env, { waitUntil() {} });
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.sent, true);
+    assert.equal(body.to, "support@kiri.ng");
+    assert.equal(harness.count(), 1);
+    assert.match(harness.written.join(""), /Kiri receipt email test/);
+  } finally {
+    delete globalThis.__kiri_smtp_connect;
+    restore();
+  }
+});
+
+test("GET /mail-test reports a placeholder key without sending", async () => {
+  const { env, restore } = await setup();
+  env.BREVO_EMAIL_USER = "support@kiri.ng";
+  env.BREVO_SMTP_KEY = "REPLACE-with-the-real-key";
+  const harness = smtpHarness();
+  globalThis.__kiri_smtp_connect = harness.connect;
+  try {
+    const response = await worker.fetch(request("/mail-test"), env, { waitUntil() {} });
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.sent, false);
+    assert.equal(body.reason, "placeholder_smtp_key");
+    assert.equal(harness.count(), 0);
+  } finally {
+    delete globalThis.__kiri_smtp_connect;
+    restore();
+  }
+});
+
+test("GET /mail-test surfaces transport errors verbatim", async () => {
+  const { env, restore } = await setup();
+  env.BREVO_EMAIL_USER = "support@kiri.ng";
+  env.BREVO_SMTP_KEY = "smtpkey_test_value";
+  globalThis.__kiri_smtp_connect = () => {
+    throw new Error("connection refused");
+  };
+  try {
+    const response = await worker.fetch(request("/mail-test"), env, { waitUntil() {} });
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.sent, false);
+    assert.equal(body.reason, "transport_error");
+    assert.match(body.error, /connection refused/);
+  } finally {
+    delete globalThis.__kiri_smtp_connect;
     restore();
   }
 });

@@ -36,9 +36,9 @@ function renewalLine(product) {
   if (product.kind === "recurring") {
     const interval = product.interval || "monthly";
     return `Your <strong>${escapeHtml(product.id)}</strong> license renews automatically every ${escapeHtml(interval)}. `
-      + "Flutterwave emails you before each renewal with a cancel link — cancelling keeps the license until the date below.";
+      + "Flutterwave emails you before each renewal with a cancel link. Cancelling keeps the license until the date below.";
   }
-  return "This is a one-time payment — it never renews.";
+  return "This is a one-time payment; it never renews.";
 }
 
 /**
@@ -47,7 +47,7 @@ function renewalLine(product) {
  */
 export function receiptMessage({ to, product, recoveryId, paidThrough }) {
   const label = String(product.id || "license").replace(/(^|[_-])([a-z])/g, (m, sep, letter) => `${sep ? " " : ""}${letter.toUpperCase()}`);
-  const subject = `Your Kiri license receipt — ${label}`;
+  const subject = `Your Kiri license receipt: ${label}`;
   const paidThroughLine = paidThrough
     ? `Paid through: <strong>${formatDate(paidThrough)}</strong>`
     : "Paid through: your receipt shows the provider's confirmation.";
@@ -72,24 +72,24 @@ export function receiptMessage({ to, product, recoveryId, paidThrough }) {
     "<div class=\"k-card\" style=\"max-width:520px;margin:0 auto;background:#ffffff;border:1px solid #e3e8f0;border-radius:12px;padding:28px;\">",
     `<img src=\"${LOGO_URL}\" alt=\"Kiri Research Labs\" width=\"170\" style=\"display:block;border:0;width:170px;height:auto;margin:0 0 18px;\">`,
     "<h1 class=\"k-h1\" style=\"margin:0 0 4px;font-size:20px;color:#1c2430;\">Payment received</h1>",
-    `<p class="k-text" style="margin:0 0 20px;color:#5b6675;">Kiri Research Labs — license receipt</p>`,
-    `<p class="k-text" style="margin:0 0 16px;color:#1c2430;">${escapeHtml(label)} license — <strong>${escapeHtml(product.currency)} ${escapeHtml(product.amount)}</strong></p>`,
+    `<p class="k-text" style="margin:0 0 20px;color:#5b6675;">Kiri Research Labs license receipt</p>`,
+    `<p class="k-text" style="margin:0 0 16px;color:#1c2430;">${escapeHtml(label)} license: <strong>${escapeHtml(product.currency)} ${escapeHtml(product.amount)}</strong></p>`,
     `<p class="k-text" style="margin:0 0 16px;color:#1c2430;">${paidThroughLine}</p>`,
     `<p class="k-text" style="margin:0 0 8px;color:#1c2430;">${renewalLine(product)}</p>`,
     "<div class=\"k-idbox\" style=\"margin:20px 0;padding:16px;background:#f0f3f8;border:1px dashed #c7d0dd;border-radius:8px;text-align:center;\">",
-    `<div class="k-cap" style="font-size:12px;color:#5b6675;margin-bottom:6px;letter-spacing:.04em;">YOUR RECOVERY ID — KEEP THIS EMAIL</div>`,
+    `<div class="k-cap" style="font-size:12px;color:#5b6675;margin-bottom:6px;letter-spacing:.04em;">YOUR RECOVERY ID · KEEP THIS EMAIL.</div>`,
     `<code class="k-rid" style="font-size:16px;letter-spacing:1px;color:#1a7f37;">${escapeHtml(recoveryId)}</code>`,
     "</div>",
-    "<p class=\"k-text\" style=\"margin:0 0 12px;color:#1c2430;\">The app finishes activating by itself when you return to it after paying — no extra steps.</p>",
+    "<p class=\"k-text\" style=\"margin:0 0 12px;color:#1c2430;\">The app finishes activating by itself when you return to it after paying. No extra steps.</p>",
     "<p class=\"k-text\" style=\"margin:0;color:#5b6675;\">On a new device or after a reinstall, open the app → Settings → Restore purchases and enter the recovery ID above. It is also stored on the device you paid from.</p>",
     "</div>",
-    "<div class=\"k-foot\" style=\"max-width:520px;margin:12px auto 0;font-size:12px;color:#6b7280;\">Kiri Research Labs · reply to this email any time · you are receiving it because a payment was made with your address.</div>",
+    "<div class=\"k-foot\" style=\"max-width:520px;margin:12px auto 0;font-size:12px;color:#6b7280;\">Kiri Research Labs · questions? Contact <a href=\"mailto:support@kiri.ng\" style=\"color:#1f6feb;\">support@kiri.ng</a> · you are receiving this because a payment was made with your address.</div>",
     "</body></html>",
   ].join("");
   const text = [
-    "Payment received — Kiri Research Labs license receipt",
+    "Payment received: Kiri Research Labs license receipt",
     "",
-    `${label} license — ${product.currency} ${product.amount}`,
+    `${label} license: ${product.currency} ${product.amount}`,
     paidThrough ? `Paid through: ${formatDate(paidThrough)}` : "",
     "",
     `Recovery ID: ${recoveryId}`,
@@ -98,7 +98,7 @@ export function receiptMessage({ to, product, recoveryId, paidThrough }) {
     "On a new device: Settings → Restore purchases, enter the recovery ID.",
     product.kind === "recurring"
       ? `Renews automatically every ${product.interval || "monthly"}; Flutterwave's reminder email has the cancel link.`
-      : "One-time payment — never renews.",
+      : "One-time payment, never renews.",
   ].filter(Boolean).join("\r\n");
   const headers = [
     `From: ${RECEIPT_FROM} <${RECEIPT_FROM_ADDRESS}>`,
@@ -112,20 +112,15 @@ export function receiptMessage({ to, product, recoveryId, paidThrough }) {
 
 /**
  * Send one receipt. Returns true when the transport accepted it, false when
- * skipped or failed (logged either way — never throws).
+ * skipped or failed (logged either way, never throws).
  *
  * env needs BREVO_EMAIL_USER (SMTP login) and BREVO_SMTP_KEY (secret; a
  * REPLACE-placeholder means "not set yet" and skips cleanly).
  */
 export async function sendReceipt(env, message, deps = {}) {
-  const user = typeof env.BREVO_EMAIL_USER === "string" ? env.BREVO_EMAIL_USER : "";
-  const pass = typeof env.BREVO_SMTP_KEY === "string" ? env.BREVO_SMTP_KEY : "";
-  if (!user || !pass) {
-    console.info("receipt_skipped", { reason: "smtp_not_configured" });
-    return false;
-  }
-  if (pass.startsWith("REPLACE")) {
-    console.info("receipt_skipped", { reason: "placeholder_smtp_key" });
+  const creds = smtpCredentials(env);
+  if (creds.skip) {
+    console.info("receipt_skipped", { reason: creds.skip });
     return false;
   }
   try {
@@ -133,9 +128,9 @@ export async function sendReceipt(env, message, deps = {}) {
     await sendSmtp(
       {
         host: "smtp-relay.brevo.com",
-        port: 587,
-        user,
-        pass,
+        port: 465,
+        user: creds.user,
+        pass: creds.pass,
         from: RECEIPT_FROM_ADDRESS,
         to: mail.to,
         headers: mail.headers,
@@ -148,5 +143,60 @@ export async function sendReceipt(env, message, deps = {}) {
   } catch (error) {
     console.error("receipt_send_failed", { message: String((error && error.message) || error) });
     return false;
+  }
+}
+
+function smtpCredentials(env) {
+  const user = typeof env.BREVO_EMAIL_USER === "string" ? env.BREVO_EMAIL_USER : "";
+  const pass = typeof env.BREVO_SMTP_KEY === "string" ? env.BREVO_SMTP_KEY : "";
+  if (!user || !pass) return { skip: "smtp_not_configured" };
+  if (pass.startsWith("REPLACE")) return { skip: "placeholder_smtp_key" };
+  return { user, pass };
+}
+
+/**
+ * Diagnostic for GET /mail-test: send a short note to the configured login
+ * address and report the exact outcome, so auth problems are visible in the
+ * response instead of logged and forgotten. The recipient is fixed to the
+ * configured login: an unauthenticated caller can only email the operator's
+ * own inbox, rate-limited by the route.
+ */
+export async function sendTestMail(env, deps = {}) {
+  const creds = smtpCredentials(env);
+  if (creds.skip) return { sent: false, reason: creds.skip };
+  const headers = [
+    `From: ${RECEIPT_FROM} <${RECEIPT_FROM_ADDRESS}>`,
+    `To: <${creds.user}>`,
+    "Subject: Kiri receipt email test",
+    "MIME-Version: 1.0",
+    "Content-Type: text/html; charset=utf-8",
+  ].join("\r\n");
+  const html = [
+    "<!doctype html><html><body style=\"margin:0;padding:24px;font-family:Arial,sans-serif;color:#1c2430;\">",
+    "<p>Kiri Research Labs</p>",
+    "<h1 style=\"font-size:18px;\">Receipt email test</h1>",
+    "<p>The license Worker reached Brevo SMTP with the configured key. Nothing to do; this message only proves the send path works.</p>",
+    "</body></html>",
+  ].join("");
+  try {
+    await sendSmtp(
+      {
+        host: "smtp-relay.brevo.com",
+        port: 465,
+        user: creds.user,
+        pass: creds.pass,
+        from: RECEIPT_FROM_ADDRESS,
+        to: creds.user,
+        headers,
+        html,
+      },
+      deps,
+    );
+    console.log("mail_test_sent", { to: creds.user });
+    return { sent: true, to: creds.user };
+  } catch (error) {
+    const message = String((error && error.message) || error);
+    console.error("mail_test_failed", { message });
+    return { sent: false, reason: "transport_error", error: message };
   }
 }

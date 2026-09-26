@@ -42,7 +42,7 @@ import {
   webhookSecretMatches,
 } from "./flutterwave.js";
 import { corsHeaders, errorResponse, htmlResponse, jsonResponse, methodNotAllowed, readJson } from "./http.js";
-import { sendReceipt } from "./receipt.js";
+import { sendReceipt, sendTestMail } from "./receipt.js";
 import { renderSuccessPage } from "./success-page.js";
 import { signEntitlement } from "./token.js";
 
@@ -448,6 +448,15 @@ export default {
           return jsonResponse(config, request, { product, ...plan, visiblePlans: visible }, 200, { publicRoute: true });
         }
         return jsonResponse(config, request, { product, ...plan }, 200, { publicRoute: true });
+      }
+      if (method === "GET" && path === "/mail-test") {
+        // SMTP diagnostic: sends one test note to the configured login and
+        // reports the exact outcome (auth errors included). Fixed recipient,
+        // rate limited, so it cannot be used to mail anyone else.
+        if (env.ENT && !(await allowRequest(env.ENT, "mailtest", clientId(request), 3, 60))) {
+          return errorResponse(config, request, 429, "rate_limited", { publicRoute: true });
+        }
+        return jsonResponse(config, request, await sendTestMail(env), 200, { publicRoute: true });
       }
       if (method === "GET" && path === "/health") {
         const body = handleHealth(config);

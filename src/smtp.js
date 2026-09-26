@@ -34,7 +34,8 @@ async function resolveConnect(deps) {
 }
 
 class Connection {
-  constructor(socket) {
+  constructor(socket, alreadySecure = false) {
+    this.secure = alreadySecure;
     this.socket = socket;
     this.attach(socket);
   }
@@ -46,10 +47,16 @@ class Connection {
     this.buffer = "";
   }
 
-  static async open(connect, host, port) {
-    const socket = connect(`${host}:${port}`, { secureTransport: "starttls" });
+  static async open(connect, host, port, secure) {
+    // Implicit TLS (465): the handshake happens inside connect()/opened.
+    // The 587 STARTTLS upgrade path exists too, but startTls() stalls on
+    // Workers (verified against Brevo: greeting/EHLO/220 all fine, the
+    // upgrade itself never completes), so production uses 465.
+    const socket = connect(`${host}:${port}`, {
+      secureTransport: secure ? "on" : "starttls",
+    });
     await socket.opened;
-    return new Connection(socket);
+    return new Connection(socket, secure);
   }
 
   async write(text) {
@@ -146,32 +153,56 @@ async function withTimeout(promise, ms, label) {
 /**
  * Send one HTML email over STARTTLS SMTP. Throws on any protocol error —
  * callers decide whether failure is fatal (it never is for receipts).
+ * Errors carry the stage that failed so a timeout tells us WHERE the
+ * connection stalled (connect/greeting/ehlo/starttls/auth/...).
  *
- * message: { host, port, user, pass, from, to, subject, text, html }
+ * message: { host, port, user, pass, from, to, headers, html }
  * deps:    { connect } for tests
  */
 export async function sendSmtp(message, deps = {}) {
   const connect = await resolveConnect(deps);
-  return withTimeout(deliver(connect, message), 15000, "smtp send");
+  let stage = "connect";
+  try {
+    return await withTimeout(
+      deliver(connect, message, (next) => { stage = next; }),
+      15000,
+      "smtp send",
+    );
+  } catch (error) {
+    throw new Error(`smtp ${stage}: ${String((error && error.message) || error)}`);
+  }
 }
 
-async function deliver(connect, message) {
-  const conn = await Connection.open(connect, message.host, message.port);
+async function deliver(connect, message, onStage) {
+  const secure = Number(message.port) === 465;
+  onStage("connect");
+  const conn = await Connection.open(connect, message.host, message.port, secure);
   try {
-    await conn.expect(220); // greeting
+    onStage("greeting");
+    await conn.expect(220);
+    onStage("ehlo");
     await conn.command("EHLO license.kiri.ng", 250);
-    await conn.command("STARTTLS", 220);
-    await conn.upgradeTls();
-    await conn.command("EHLO license.kiri.ng", 250);
+    if (!conn.secure) {
+      onStage("starttls");
+      await conn.command("STARTTLS", 220);
+      onStage("tls-upgrade");
+      await conn.upgradeTls();
+      onStage("ehlo-secure");
+      await conn.command("EHLO license.kiri.ng", 250);
+    }
+    onStage("auth");
     await conn.command("AUTH LOGIN", 334);
     await conn.command(base64(message.user), 334);
     await conn.command(base64(message.pass), 235);
+    onStage("envelope");
     await conn.command(`MAIL FROM:<${message.from}>`, 250);
     await conn.command(`RCPT TO:<${message.to}>`, 250);
+    onStage("data");
     await conn.command("DATA", 354);
     const payload = dotStuff(`${message.headers}\r\n\r\n${message.html}`);
     await conn.write(`${payload}${payload.endsWith("\r\n") ? "" : "\r\n"}.\r\n`);
     await conn.expect(250);
+    onStage("quit");
     await conn.write("QUIT\r\n");
     return true;
   } finally {
