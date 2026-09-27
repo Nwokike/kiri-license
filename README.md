@@ -90,7 +90,7 @@ Flutterwave calls this endpoint. The Worker checks `verif-hash`, deduplicates ev
 - `seen:<event_id>`: temporary webhook idempotency marker.
 - `pending:<sha256(recovery_id)>`: temporary checkout record.
 
-No raw recovery ID, customer name, email, card information, or full webhook body is stored. Provider transaction and subscription IDs are internal lookup data and are never used as public credentials.
+Card information, customer name and full webhook bodies are never stored. The entitlement record does keep the payer's email, the full recovery ID and entitlement status: receipts need them, and a buyer who loses their recovery ID can be helped by proving the purchase email. KV keys are hashed (sha256); provider transaction and subscription IDs are internal lookup data and are never used as public credentials.
 
 ## Local development
 

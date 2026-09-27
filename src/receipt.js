@@ -82,6 +82,7 @@ export function receiptMessage({ to, product, recoveryId, paidThrough }) {
     "</div>",
     "<p class=\"k-text\" style=\"margin:0 0 12px;color:#1c2430;\">The app finishes activating by itself when you return to it after paying. No extra steps.</p>",
     "<p class=\"k-text\" style=\"margin:0;color:#5b6675;\">On a new device or after a reinstall, open the app → Settings → Restore purchases and enter the recovery ID above. It is also stored on the device you paid from.</p>",
+    "<p class=\"k-text\" style=\"margin:8px 0 0;color:#5b6675;\">Lost this email? Reply to it with the address you paid with and we will send your recovery ID back.</p>",
     "</div>",
     "<div class=\"k-foot\" style=\"max-width:520px;margin:12px auto 0;font-size:12px;color:#6b7280;\">Kiri Research Labs · questions? Contact <a href=\"mailto:support@kiri.ng\" style=\"color:#1f6feb;\">support@kiri.ng</a> · you are receiving this because a payment was made with your address.</div>",
     "</body></html>",
@@ -96,6 +97,7 @@ export function receiptMessage({ to, product, recoveryId, paidThrough }) {
     "",
     "The app finishes activating by itself when you return to it.",
     "On a new device: Settings → Restore purchases, enter the recovery ID.",
+    "Lost this email? Reply with the address you paid with and we will send your recovery ID back.",
     product.kind === "recurring"
       ? `Renews automatically every ${product.interval || "monthly"}; Flutterwave's reminder email has the cancel link.`
       : "One-time payment, never renews.",
