@@ -101,6 +101,19 @@ Content-Type: application/json
 
 Use the same request body as restore. Refresh when the app starts online, resumes from background, or reaches the end of its local token lifetime.
 
+## 5. What the client must respect
+
+These are not suggestions. The Worker runs on the free tier of Workers KV, where the account gets **1,000 writes per day across every request**. A request path that writes is a request path that can exhaust the day's budget, and a client that polls carelessly spends writes that a payment or a token refresh then needs.
+
+The rules:
+
+- **Debounce to at most one `/restore` per foreground burst.** The Worker allows 20 requests per 60 seconds per IP, and every app shares that bucket. A burst of `RESUME`/`SHOW` lifecycle events must collapse into a single reconcile.
+- **The checkout watcher must back off and must abort on terminal codes.** Poll no faster than a few seconds at first, add jitter, grow the interval as failures accumulate, and stop entirely on `402 payment_not_valid` and `403 app_not_entitled` — a payment the server has already refused will never become valid, and polling it for the full 15-minute window spends writes for an answer that cannot change. `404 license_not_found` is *not* terminal: just after a successful payment the record may not exist yet (webhook lag), so keep waiting.
+- **Prefer `/restore` over `/status` for the periodic refresh.** `/restore` re-issues the token, so one request does both jobs. Calling `/status` for the status and then `/restore` for the token spends twice as much to learn the same thing.
+- **Cache the catalog.** `GET /catalog` is served with `Cache-Control: public, max-age=60`; a client that fetches it on every settings open is asking the CDN for a copy it already has.
+
+The reference implementation of the watcher cadence is `akili-v2/src/services/premium_service.py` (see also `CollabShell`). The other apps in this family are kept identical to it on purpose.
+
 ## Offline token verification
 
 The token format is:

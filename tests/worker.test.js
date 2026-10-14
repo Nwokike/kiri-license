@@ -6,6 +6,7 @@ if (!globalThis.crypto) globalThis.crypto = webcrypto;
 
 const { default: worker } = await import("../src/worker.js");
 const { base64UrlEncode, verifyEntitlement } = await import("../src/token.js");
+const { allowRequest, resetRateLimiter } = await import("../src/entitlements.js");
 
 class MockKV {
   constructor() {
@@ -74,6 +75,11 @@ const catalog = {
 };
 
 async function setup() {
+  // The rate limiter counts in isolate memory, which outlives a single
+  // test in this suite, and every request here carries the same client
+  // identity ("unknown"). Without this reset the counters bleed between
+  // cases and later ones start failing with 429.
+  resetRateLimiter();
   const keys = await makeKeyPair();
   const kv = new MockKV();
   const env = {
@@ -673,6 +679,64 @@ test("GET /mail-test surfaces transport errors verbatim", async () => {
     assert.match(body.error, /connection refused/);
   } finally {
     delete globalThis.__kiri_smtp_connect;
+    restore();
+  }
+});
+
+test("the rate limiter blocks once the window limit is reached", async () => {
+  resetRateLimiter();
+  for (let i = 1; i < 4; i++) {
+    assert.equal(await allowRequest("mailtest", "203.0.113.9", 3, 60), true, `request ${i}`);
+  }
+  // The fourth request inside the same minute window is refused.
+  assert.equal(await allowRequest("mailtest", "203.0.113.9", 3, 60), false);
+  // A different client is counted independently.
+  assert.equal(await allowRequest("mailtest", "203.0.113.10", 3, 60), true);
+});
+
+test("the rate limiter resets in the next window", async () => {
+  resetRateLimiter();
+  assert.equal(await allowRequest("checkout", "203.0.113.11", 2, 60), true);
+  assert.equal(await allowRequest("checkout", "203.0.113.11", 2, 60), true);
+  assert.equal(await allowRequest("checkout", "203.0.113.11", 2, 60), false);
+  // Next id for a window that has rolled over: the limit applies again.
+  const laterId = `203.0.113.12:${Math.floor(Date.now() / 60000) + 1}`;
+  assert.equal(await allowRequest("checkout", laterId, 2, 60), true);
+});
+
+test("rate limiting costs no KV writes", async () => {
+  // The whole point of counting in isolate memory: the free tier allows
+  // 1,000 KV writes per day, so abuse control must not spend any of them.
+  // The only write permitted is the one entitlement record the mocked
+  // provider's successful payment creates on the first restore.
+  const { env, kv, restore } = await setup();
+  try {
+    for (let i = 0; i < 40; i++) {
+      await worker.fetch(request("/restore", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Origin: "https://app.test", "CF-Connecting-IP": "203.0.113.77" },
+        body: JSON.stringify({ app_id: "com.example.app", recovery_id: "KIRI-L-AAAAAAAAAAAAAAAAAAAA" }),
+      }), env, { waitUntil() {} });
+    }
+    const writes = [...kv.values.keys()].filter((key) => !key.endsWith(":ttl"));
+    assert.deepEqual(writes.filter((key) => key.startsWith("rate:")), [], "rate limiting must not write to KV");
+    assert.equal(writes.length, 1, `expected only the entitlement record, saw: ${writes.join(", ")}`);
+  } finally {
+    restore();
+  }
+});
+
+test("a checkout writes only the pending record, no tx mapping", async () => {
+  // The tx_ref -> hash mapping the checkout used to write is derivable
+  // from the recovery ID, so it is not stored.
+  const { env, kv, restore } = await setup();
+  try {
+    const response = await checkout(env, "lifetime");
+    assert.equal(response.status, 201);
+    const writes = [...kv.values.keys()].filter((key) => !key.endsWith(":ttl"));
+    assert.equal(writes.length, 1, `expected only the pending record, saw: ${writes.join(", ")}`);
+    assert.match(writes[0], /^pending:/);
+  } finally {
     restore();
   }
 });

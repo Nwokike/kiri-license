@@ -6,6 +6,28 @@ const TEMP_TTL_SECONDS = 30 * 24 * 60 * 60;
 const SEEN_TTL_SECONDS = 7 * 24 * 60 * 60;
 const STALE_MS = 24 * 60 * 60 * 1000;
 
+// Fixed-window rate limiting in Workers isolate memory.
+//
+// This used to count in Workers KV, which cost one KV write per allowed
+// request. The free tier allows 1,000 writes per day, so a busy Worker
+// could exhaust its whole write budget on abuse control and start failing
+// real entitlement writes. Isolate memory is free and never counts against
+// the KV limits — see docs/kv-free-tier-budget.md.
+//
+// The trade-off is that a limit is enforced per isolate (per Cloudflare
+// colo) instead of account-wide, so one client can multiply its
+// allowance by the number of colos in front of the Worker. That is
+// acceptable here: this is a brake on careless retry loops, not a
+// security boundary. Every route that matters still verifies the signed
+// entitlement, the paid-through date, and the app scope. It also fails
+// open, exactly as the KV version did.
+//
+// Bounded and TTL-pruned: an attacker spraying spoofed X-Forwarded-For
+// headers can only ever grow this map to the cap, after which expired
+// entries are swept on the next access.
+const rateWindow = new Map();
+const RATE_WINDOW_HARD_CAP = 5000;
+
 export function nowMs() {
   return Date.now();
 }
@@ -162,8 +184,11 @@ export async function storeCheckout(kv, { hash, txRef, product, scope, email, no
     email: typeof email === "string" && email.trim() ? email.trim() : null,
     createdAt: now,
   };
+  // Only the pending email is stored. A tx_ref -> hash mapping is not
+  // written: checkout uses the recovery ID as tx_ref, and
+  // recoveryHash(tx_ref) derives the same hash for free. See
+  // findWebhookRecord in worker.js, which reads the derived hash first.
   await kv.put(pendingKey(hash), JSON.stringify(pending), { expirationTtl: TEMP_TTL_SECONDS });
-  await putMapping(kv, await txKey(txRef), hash);
 }
 
 export async function readPending(kv, hash) {
@@ -189,14 +214,34 @@ export async function resolveEntHash(kv, { txRef, subscriptionId }) {
   return null;
 }
 
-export async function allowRequest(kv, bucket, identifier, limit, windowSeconds) {
-  if (!kv) return true;
-  const bucketId = Math.floor(nowMs() / (windowSeconds * 1000));
-  const key = `rate:${bucket}:${await sha256Hex(`${identifier}:${bucketId}`)}`;
+function sweepRateWindow(now) {
+  if (rateWindow.size < RATE_WINDOW_HARD_CAP) return;
+  for (const [key, entry] of rateWindow) {
+    if (now >= entry.expiresAt) rateWindow.delete(key);
+  }
+}
+
+// Test seam only: an isolate lives for the life of the process, so a suite
+// that imports this module once needs a way to start from an empty window
+// between cases. Production code never calls this.
+export function resetRateLimiter() {
+  rateWindow.clear();
+}
+
+export async function allowRequest(bucket, identifier, limit, windowSeconds) {
+  const now = nowMs();
+  const bucketId = Math.floor(now / (windowSeconds * 1000));
+  const key = `${bucket}:${identifier}:${bucketId}`;
+  const expiresAt = now + windowSeconds * 1000;
   try {
-    const current = Number(await kv.get(key)) || 0;
-    if (current >= limit) return false;
-    await kv.put(key, String(current + 1), { expirationTtl: windowSeconds });
+    const entry = rateWindow.get(key);
+    if (!entry || now >= entry.expiresAt) {
+      sweepRateWindow(now);
+      rateWindow.set(key, { count: 1, expiresAt });
+      return true;
+    }
+    if (entry.count >= limit) return false;
+    entry.count += 1;
     return true;
   } catch {
     return true;

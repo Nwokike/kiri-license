@@ -23,7 +23,6 @@ import {
   statusFor,
   storeCheckout,
   subKey,
-  txKey,
   writeRecord,
 } from "./entitlements.js";
 import {
@@ -41,7 +40,7 @@ import {
   verifyByReference,
   webhookSecretMatches,
 } from "./flutterwave.js";
-import { corsHeaders, errorResponse, htmlResponse, jsonResponse, methodNotAllowed, readJson } from "./http.js";
+import { corsHeaders, errorResponse, htmlResponse, jsonResponse, methodNotAllowed, readJson, withPublicCache } from "./http.js";
 import { sendReceipt, sendTestMail } from "./receipt.js";
 import { renderSuccessPage } from "./success-page.js";
 import { signEntitlement } from "./token.js";
@@ -148,10 +147,16 @@ async function refreshSubscription(config, env, record) {
       flwSubscriptionId: subscription.id == null ? record.flwSubscriptionId : String(subscription.id),
       updatedAt: nowMs(),
     };
-    if (next.flwSubscriptionId && next.flwSubscriptionId !== record.flwSubscriptionId) {
+    // Write only when the provider said something new. This runs on every
+    // idle-subscription reconcile, and an unchanged refresh would spend a
+    // KV write to store identical bytes.
+    const changed =
+      next.subscriptionStatus !== record.subscriptionStatus
+      || next.flwSubscriptionId !== record.flwSubscriptionId;
+    if (changed && next.flwSubscriptionId && next.flwSubscriptionId !== record.flwSubscriptionId) {
       await putMapping(env.ENT, await subKey(next.flwSubscriptionId), record.ent);
     }
-    return { record: next, changed: true };
+    return { record: next, changed };
   } catch {
     return { record, changed: false };
   }
@@ -176,7 +181,9 @@ async function recordFromVerifiedPayment(config, env, product, recoveryId, payme
   if (record.flwSubscriptionId) {
     await putMapping(env.ENT, await subKey(record.flwSubscriptionId), hash);
   }
-  await putMapping(env.ENT, await txKey(recoveryId), hash);
+  // No tx_ref mapping: checkout used the recovery ID as tx_ref, so
+  // recoveryHash(tx_ref) reproduces this hash for free. See
+  // findWebhookRecord below.
   await writeRecord(env.ENT, record);
   await maybeSendReceipt(config, env, record, { recoveryId, paymentId: payment.id });
   return record;
@@ -230,7 +237,7 @@ async function handleCheckout(request, config, env) {
   if (!product.paymentPlanId && product.kind === "recurring") {
     return errorResponse(config, request, 503, "payment_plan_not_configured");
   }
-  if (!(await allowRequest(env.ENT, "checkout", clientId(request), 10, 60))) {
+  if (!(await allowRequest("checkout", clientId(request), 10, 60))) {
     return errorResponse(config, request, 429, "rate_limited");
   }
   const recoveryId = makeRecoveryId(product.code);
@@ -280,7 +287,7 @@ async function handleRestore(request, config, env, statusOnly = false) {
   const body = await readJson(request);
   const parsed = body ? parseRecoveryId(body.recovery_id) : null;
   if (!body || !parsed || !validateAppId(body.app_id)) return errorResponse(config, request, 400, "invalid_request");
-  if (!(await allowRequest(env.ENT, "restore", clientId(request), 20, 60))) {
+  if (!(await allowRequest("restore", clientId(request), 20, 60))) {
     return errorResponse(config, request, 429, "rate_limited");
   }
   const hash = await recoveryHash(parsed.id);
@@ -317,6 +324,14 @@ async function findWebhookRecord(config, env, payload) {
   const data = extractWebhookData(payload);
   const txRef = data.tx_ref || payload?.tx_ref;
   const subscriptionId = data.subscription_id || data.subscription?.id;
+  // Checkout sets tx_ref to the recovery ID, so the entitlement hash is
+  // derivable without reading a mapping — and without having spent a KV
+  // write storing one. The stored tx mapping is still consulted as a
+  // fallback for records created before this shortcut existed.
+  if (txRef) {
+    const derived = await readRecord(env.ENT, await recoveryHash(txRef));
+    if (derived) return derived;
+  }
   const entHash = await resolveEntHash(env.ENT, { txRef, subscriptionId });
   if (!entHash) return null;
   return readRecord(env.ENT, entHash);
@@ -453,7 +468,7 @@ export default {
         // SMTP diagnostic: sends one test note to the configured login and
         // reports the exact outcome (auth errors included). Fixed recipient,
         // rate limited, so it cannot be used to mail anyone else.
-        if (env.ENT && !(await allowRequest(env.ENT, "mailtest", clientId(request), 3, 60))) {
+        if (!(await allowRequest("mailtest", clientId(request), 3, 60))) {
           return errorResponse(config, request, 429, "rate_limited", { publicRoute: true });
         }
         return jsonResponse(config, request, await sendTestMail(env), 200, { publicRoute: true });
@@ -464,7 +479,14 @@ export default {
         return jsonResponse(config, request, body, 200, { publicRoute: true });
       }
       if (method === "GET" && path === "/catalog") {
-        return jsonResponse(config, request, { products: publicCatalog(config) }, 200, { publicRoute: true });
+        // Cached at the edge: the catalog changes when the owner edits
+        // product variables, which is rarer than a single app session, so
+        // a minute of staleness costs nothing and spares the Worker an
+        // invocation per request.
+        return withPublicCache(
+          jsonResponse(config, request, { products: publicCatalog(config) }, 200, { publicRoute: true }),
+          60,
+        );
       }
       if (method === "GET" && path === "/success") {
         return htmlResponse(config, request, renderSuccessPage(config, {

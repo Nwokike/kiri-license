@@ -85,12 +85,14 @@ Flutterwave calls this endpoint. The Worker checks `verif-hash`, deduplicates ev
 ## KV layout
 
 - `ent:<sha256(recovery_id)>`: the self-contained entitlement record.
-- `tx:<sha256(tx_ref)>`: transaction-to-entitlement lookup.
+- `tx:<sha256(tx_ref)>`: transaction-to-entitlement lookup, kept only for records written before the derived-hash shortcut.
 - `sub:<sha256(subscription_id)>`: subscription-to-entitlement lookup.
 - `seen:<event_id>`: temporary webhook idempotency marker.
 - `pending:<sha256(recovery_id)>`: temporary checkout record.
 
 Card information, customer name and full webhook bodies are never stored. The entitlement record does keep the payer's email, the full recovery ID and entitlement status: receipts need them, and a buyer who loses their recovery ID can be helped by proving the purchase email. KV keys are hashed (sha256); provider transaction and subscription IDs are internal lookup data and are never used as public credentials.
+
+The service targets the **free** tier of Workers KV, which allows 1,000 writes per day. That single number shapes the code: nothing on a request hot path writes to KV, so rate limiting counts in isolate memory instead of in KV, and the `tx` lookup is derived rather than stored. [`docs/kv-free-tier-budget.md`](docs/kv-free-tier-budget.md) has the arithmetic and the rules to follow when changing `src/worker.js` or `src/entitlements.js`.
 
 ## Local development
 
@@ -123,4 +125,5 @@ The existing `flet-billing` package remains responsible for Play Billing and Sto
 ## Documentation
 
 - [`docs/client-integration.md`](docs/client-integration.md) is the contract for building and integrating every app client.
+- [`docs/kv-free-tier-budget.md`](docs/kv-free-tier-budget.md) is the write budget every request is designed around — read it before changing `src/worker.js` or `src/entitlements.js`.
 - [`DEPLOYMENT.md`](DEPLOYMENT.md) covers Cloudflare Git integration, KV, custom domain, secrets, Flutterwave Test/Live setup, and rollback.
